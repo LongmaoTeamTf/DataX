@@ -107,8 +107,78 @@ This software is free to use under the Apache License [Apache license](https://g
     7. 具有较强的问题分析和处理能力、比较强的动手能力，对技术有强烈追求者优先考虑；
     8. 对高并发、高稳定可用性、高性能、大数据处理有过实际项目及产品经验者优先考虑；
     9. 有大数据产品、云产品、中间件技术解决方案者优先考虑。
-````
+```
 钉钉用户群：23169395
+
+
+
+
+# 我们做了如下优化
+## 有时候大家希望导入mysqljoin的数据为数组的形式，比如
+
+``` sql
+SELECT video.id AS _id, title, video_tag_map.tag_id as tag FROM Video_New LEFT JOIN video_tag_map ON video.id = video_tag_map.video_id
+```
+
+- 会产生入校数据
+
+
+| _id | title | tag |
+| --- | --- | --- |
+| 464 | 4分钟游遍咖喱国 | 10 |
+| 464 | 4分钟游遍咖喱国 | 12 |
+| 464 | 4分钟游遍咖喱国 | 13 |
+| 461 | 咖喱国 | 10 |
+| 461 | 咖喱国 | 12 |
+| 461 | 咖喱国 | 13 |
+
+
+
+- 但是我们希望导入
+{id:464, title:"4分钟游遍咖喱国", tag:[10, 12,13]"}
+
+- 我们修改了es的遍历方式，可以通过如下配置实现
+- 增加了 need_join
+``` json
+{
+    "job": {
+        "setting": {
+            "speed": {
+                 "channel":1
+            }
+        },
+        "content": [
+            {
+                "reader": {
+                    "name": "mysqlreader",
+                    "parameter": {
+                        "connection": [
+                            {
+                                "querySql": [
+                                    "SELECT video.id AS _id, title, video_tag_map.tag_id as tag FROM Video_New LEFT JOIN video_tag_map ON video.id = video_tag_map.video_id"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "writer": {
+                    "name": "elasticsearchwriter",
+          "parameter": {
+            "column": [
+              {"name": "pk", "type":"id"},
+              { "name": "title","type": "text","analyzer": "ik_max_word"},
+              { "name": "tag","type": "text","need_join":1 },
+            ]
+          }
+                }
+            }
+        ]
+    }
+}
+```
+
+
+
 
 
 
