@@ -136,7 +136,7 @@ SELECT video.id AS _id, title, video_tag_map.tag_id as tag FROM Video_New LEFT J
 
 - 但是我们希望导入
 {id:464, title:"4分钟游遍咖喱国", tag:[10, 12,13]"}
-- 即实现了将join数据导出成数组
+- **即实现了将join数据导出成数组**
 - 我们修改了es的遍历方式，可以通过如下配置实现
 - 增加了 need_join
 ``` json
