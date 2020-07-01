@@ -114,7 +114,7 @@ This software is free to use under the Apache License [Apache license](https://g
 
 
 # 我们做了如下优化
-## 有时候大家希望导入mysqljoin的数据为数组的形式，比如
+## 有时候大家希望导入mysql join的数据为数组的形式，比如
 
 ``` sql
 SELECT video.id AS _id, title, video_tag_map.tag_id as tag FROM Video_New LEFT JOIN video_tag_map ON video.id = video_tag_map.video_id
@@ -136,7 +136,7 @@ SELECT video.id AS _id, title, video_tag_map.tag_id as tag FROM Video_New LEFT J
 
 - 但是我们希望导入
 {id:464, title:"4分钟游遍咖喱国", tag:[10, 12,13]"}
-
+- 即实现了将join数据导出成数组
 - 我们修改了es的遍历方式，可以通过如下配置实现
 - 增加了 need_join
 ``` json
