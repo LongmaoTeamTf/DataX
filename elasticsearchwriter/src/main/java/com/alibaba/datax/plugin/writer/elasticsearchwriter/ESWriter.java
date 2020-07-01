@@ -34,6 +34,8 @@ public class ESWriter extends Writer {
 
         private Configuration conf = null;
 
+        private static List<String> joinKeys = new ArrayList<String>();
+
         @Override
         public void init() {
             this.conf = super.getPluginJobConf();
@@ -104,6 +106,12 @@ public class ESWriter extends Writer {
                         colType = ESFieldType.ID;
                         colTypeStr = "id";
                     }
+
+                    boolean needJoin = jo.getIntValue("need_join") == 1;
+                    if (needJoin) {
+                        joinKeys.add(colName);
+                    }
+                    columnItem.setNeedJoin(needJoin);
 
                     columnItem.setName(colName);
                     columnItem.setType(colTypeStr);
@@ -269,6 +277,7 @@ public class ESWriter extends Writer {
         @Override
         public void startWrite(RecordReceiver recordReceiver) {
             List<Record> writerBuffer = new ArrayList<Record>(this.batchSize);
+
             Record record = null;
             long total = 0;
             while ((record = recordReceiver.getFromReader()) != null) {
@@ -310,87 +319,40 @@ public class ESWriter extends Writer {
         }
 
         private long doBatchInsert(final List<Record> writerBuffer) {
-            Map<String, Object> data = null;
             final Bulk.Builder bulkaction = new Bulk.Builder().defaultIndex(this.index).defaultType(this.type);
+            Map<String, Object> preData = null;
             for (Record record : writerBuffer) {
-                data = new HashMap<String, Object>();
-                String id = null;
-                for (int i = 0; i < record.getColumnNumber(); i++) {
-                    Column column = record.getColumn(i);
-                    String columnName = columnList.get(i).getName();
-                    ESFieldType columnType = typeList.get(i);
-                    //如果是数组类型，那它传入的必是字符串类型
-                    if (columnList.get(i).isArray() != null && columnList.get(i).isArray()) {
-                        String[] dataList = column.asString().split(splitter);
-                        if (!columnType.equals(ESFieldType.DATE)) {
-                            data.put(columnName, dataList);
-                        } else {
-                            for (int pos = 0; pos < dataList.length; pos++) {
-                                dataList[pos] = getDateStr(columnList.get(i), column);
+                Map<String, Object> currentData = retriveData(record);
+
+                if (preData == null) {
+                    preData = currentData;
+                } else if (preData.get("id").equals(currentData.get("id"))) {
+                    for (String key : Job.joinKeys) {
+                        Object curValue = currentData.get(key);
+                        if (curValue != null) {
+                            if (preData.get(key) instanceof List) {
+                                ((List) preData.get(key)).add(curValue);
+                            } else {
+                                List<Object> newList = new ArrayList<>();
+                                newList.add(curValue);
+                                newList.add(preData.get(key));
+                                preData.put(key, newList);
                             }
-                            data.put(columnName, dataList);
-                        }
-                    } else {
-                        switch (columnType) {
-                            case ID:
-                                if (id != null) {
-                                    id += record.getColumn(i).asString();
-                                } else {
-                                    id = record.getColumn(i).asString();
-                                }
-                                break;
-                            case DATE:
-                                try {
-                                    String dateStr = getDateStr(columnList.get(i), column);
-                                    data.put(columnName, dateStr);
-                                } catch (Exception e) {
-                                    getTaskPluginCollector().collectDirtyRecord(record, String.format("时间类型解析失败 [%s:%s] exception: %s", columnName, column.toString(), e.toString()));
-                                }
-                                break;
-                            case KEYWORD:
-                            case STRING:
-                            case TEXT:
-                            case IP:
-                            case GEO_POINT:
-                                data.put(columnName, column.asString());
-                                break;
-                            case BOOLEAN:
-                                data.put(columnName, column.asBoolean());
-                                break;
-                            case BYTE:
-                            case BINARY:
-                                data.put(columnName, column.asBytes());
-                                break;
-                            case LONG:
-                                data.put(columnName, column.asLong());
-                                break;
-                            case INTEGER:
-                                data.put(columnName, column.asBigInteger());
-                                break;
-                            case SHORT:
-                                data.put(columnName, column.asBigInteger());
-                                break;
-                            case FLOAT:
-                            case DOUBLE:
-                                data.put(columnName, column.asDouble());
-                                break;
-                            case NESTED:
-                            case OBJECT:
-                            case GEO_SHAPE:
-                                data.put(columnName, JSON.parse(column.asString()));
-                                break;
-                            default:
-                                getTaskPluginCollector().collectDirtyRecord(record, "类型错误:不支持的类型:" + columnType + " " + columnName);
                         }
                     }
-                }
-
-                if (id == null) {
-                    //id = UUID.randomUUID().toString();
-                    bulkaction.addAction(new Index.Builder(data).build());
                 } else {
-                    bulkaction.addAction(new Index.Builder(data).id(id).build());
+                    if (preData.get("id") == null) {
+                        bulkaction.addAction(new Index.Builder(preData).build());
+                    } else {
+                        bulkaction.addAction(new Index.Builder(preData).id(preData.get("id").toString()).build());
+                    }
+                    preData = currentData;
                 }
+            }
+            if (preData.get("id") == null) {
+                bulkaction.addAction(new Index.Builder(preData).build());
+            } else {
+                bulkaction.addAction(new Index.Builder(preData).id(preData.get("id").toString()).build());
             }
 
             try {
@@ -446,6 +408,82 @@ public class ESWriter extends Writer {
                 }
             }
             return 0;
+        }
+
+        public Map<String, Object> retriveData(Record record) {
+            HashMap data = new HashMap<String, Object>();
+            String id = null;
+            for (int i = 0; i < record.getColumnNumber(); i++) {
+                Column column = record.getColumn(i);
+                String columnName = columnList.get(i).getName();
+                ESFieldType columnType = typeList.get(i);
+                //如果是数组类型，那它传入的必是字符串类型
+                if (columnList.get(i).isArray() != null && columnList.get(i).isArray()) {
+                    String[] dataList = column.asString().split(splitter);
+                    if (!columnType.equals(ESFieldType.DATE)) {
+                        data.put(columnName, dataList);
+                    } else {
+                        for (int pos = 0; pos < dataList.length; pos++) {
+                            dataList[pos] = getDateStr(columnList.get(i), column);
+                        }
+                        data.put(columnName, dataList);
+                    }
+                } else {
+                    switch (columnType) {
+                        case ID:
+                            if (id != null) {
+                                id += record.getColumn(i).asString();
+                            } else {
+                                id = record.getColumn(i).asString();
+                            }
+                            data.put("id", id);
+                            break;
+                        case DATE:
+                            try {
+                                String dateStr = getDateStr(columnList.get(i), column);
+                                data.put(columnName, dateStr);
+                            } catch (Exception e) {
+                                getTaskPluginCollector().collectDirtyRecord(record, String.format("时间类型解析失败 [%s:%s] exception: %s", columnName, column.toString(), e.toString()));
+                            }
+                            break;
+                        case KEYWORD:
+                        case STRING:
+                        case TEXT:
+                        case IP:
+                        case GEO_POINT:
+                            data.put(columnName, column.asString());
+                            break;
+                        case BOOLEAN:
+                            data.put(columnName, column.asBoolean());
+                            break;
+                        case BYTE:
+                        case BINARY:
+                            data.put(columnName, column.asBytes());
+                            break;
+                        case LONG:
+                            data.put(columnName, column.asLong());
+                            break;
+                        case INTEGER:
+                            data.put(columnName, column.asBigInteger());
+                            break;
+                        case SHORT:
+                            data.put(columnName, column.asBigInteger());
+                            break;
+                        case FLOAT:
+                        case DOUBLE:
+                            data.put(columnName, column.asDouble());
+                            break;
+                        case NESTED:
+                        case OBJECT:
+                        case GEO_SHAPE:
+                            data.put(columnName, JSON.parse(column.asString()));
+                            break;
+                        default:
+                            getTaskPluginCollector().collectDirtyRecord(record, "类型错误:不支持的类型:" + columnType + " " + columnName);
+                    }
+                }
+            }
+            return data;
         }
 
         @Override

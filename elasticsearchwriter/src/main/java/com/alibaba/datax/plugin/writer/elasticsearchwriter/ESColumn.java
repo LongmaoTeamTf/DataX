@@ -15,6 +15,16 @@ public class ESColumn {
 
     private Boolean array;
 
+    public Boolean getNeedJoin() {
+        return needJoin;
+    }
+
+    public void setNeedJoin(Boolean needJoin) {
+        this.needJoin = needJoin;
+    }
+
+    private Boolean needJoin;
+
     public void setName(String name) {
         this.name = name;
     }
